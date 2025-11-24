@@ -16,6 +16,7 @@ export interface Entity {
 
 export interface Player extends Entity {
     lastShotTime: number;
+    turretRotation: number;
 }
 
 export interface Particle {
@@ -49,6 +50,7 @@ export const INITIAL_STATE: GameState = {
         position: { x: 0, y: 0 },
         velocity: { x: 0, y: 0 },
         rotation: 0,
+        turretRotation: 0,
         radius: 20,
         active: true,
         color: '#00ff00',

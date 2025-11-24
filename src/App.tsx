@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { GameCanvas } from './components/GameCanvas'
-import { Joystick } from './components/Joystick'
-import { ShootButton } from './components/ShootButton'
+import { MobileControls } from './components/MobileControls'
 import { MainMenu } from './components/MainMenu'
 import { GameOverMenu } from './components/GameOverMenu'
 import { useGameLoop } from './hooks/useGameLoop'
@@ -74,7 +73,8 @@ function App() {
       const now = Date.now();
       if (now - prev.player.lastShotTime < FIRE_RATE) return prev;
 
-      const angle = prev.player.rotation;
+      // Use turretRotation for shooting direction
+      const angle = prev.player.turretRotation;
       const velocity = {
         x: Math.cos(angle) * BULLET_SPEED,
         y: Math.sin(angle) * BULLET_SPEED
@@ -110,6 +110,13 @@ function App() {
     }
   }, [isMouseDown, gameState.gameOver, gameState.gameStarted, handleShoot]);
 
+  const handleMobileAim = useCallback((angle: number) => {
+    setGameState(prev => ({
+      ...prev,
+      player: { ...prev.player, turretRotation: angle }
+    }));
+  }, []);
+
   const updateGame = (deltaTime: number) => {
     if (gameState.gameOver || !gameState.gameStarted) return;
 
@@ -132,13 +139,17 @@ function App() {
       const newPlayerX = prev.player.position.x + combinedInput.x * PLAYER_SPEED * scaledDelta;
       const newPlayerY = prev.player.position.y + combinedInput.y * PLAYER_SPEED * scaledDelta;
 
-      // Calculate rotation
+      // Calculate rotation (Body follows movement)
       let playerRotation = prev.player.rotation;
-
-      if (mousePos.x !== 0 || mousePos.y !== 0) {
-        playerRotation = Math.atan2(mousePos.y - newPlayerY, mousePos.x - newPlayerX);
-      } else if (inputMagnitude > 0.1) {
+      if (inputMagnitude > 0.1) {
         playerRotation = Math.atan2(combinedInput.y, combinedInput.x);
+      }
+
+      // Calculate Turret Rotation (Mouse or Mobile Aim)
+      let turretRotation = prev.player.turretRotation;
+      if (mousePos.x !== 0 || mousePos.y !== 0) {
+        // If mouse moved, it overrides mobile aim (for desktop)
+        turretRotation = Math.atan2(mousePos.y - newPlayerY, mousePos.x - newPlayerX);
       }
 
       // Keep player in bounds
@@ -274,7 +285,8 @@ function App() {
         player: {
           ...prev.player,
           position: { x: clampedX, y: clampedY },
-          rotation: playerRotation
+          rotation: playerRotation,
+          turretRotation // Update turret rotation
         },
         enemies: newEnemies,
         bullets: newBullets,
@@ -344,13 +356,11 @@ function App() {
 
         {/* Controls - Only show when game started and not over */}
         {gameState.gameStarted && !gameState.gameOver && (
-          <div className="flex justify-between items-end pb-8 pointer-events-auto">
-            <Joystick
-              onMove={setInputVector}
-              onStop={() => setInputVector({ x: 0, y: 0 })}
-            />
-            <ShootButton onShoot={handleShoot} disabled={gameState.gameOver} />
-          </div>
+          <MobileControls
+            onMove={setInputVector}
+            onAim={handleMobileAim}
+            onShoot={handleShoot}
+          />
         )}
       </div>
     </div>

@@ -57,21 +57,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
 
         // Draw Player
         const { player } = gameState;
+
+        // 1. Draw Body (Rotated by movement)
         ctx.save();
         ctx.translate(player.position.x, player.position.y);
         ctx.rotate(player.rotation);
 
-        // Tank Body
         ctx.fillStyle = player.color;
         ctx.shadowBlur = 20;
         ctx.shadowColor = player.color;
         ctx.fillRect(-15, -15, 30, 30);
+        ctx.restore();
 
-        // Tank Turret
+        // 2. Draw Turret (Rotated by aim)
+        ctx.save();
+        ctx.translate(player.position.x, player.position.y);
+        ctx.rotate(player.turretRotation);
+
         ctx.fillStyle = '#fff';
         ctx.shadowBlur = 0;
         ctx.fillRect(0, -5, 25, 10);
-
         ctx.restore();
 
         // Draw Enemies
