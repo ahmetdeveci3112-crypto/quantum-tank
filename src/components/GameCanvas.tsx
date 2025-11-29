@@ -53,6 +53,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
 
         ctx.globalAlpha = 1.0; // Reset alpha
 
+        // Draw Debris (Scorch marks)
+        gameState.debris.forEach(d => {
+            ctx.save();
+            ctx.translate(d.position.x, d.position.y);
+            ctx.rotate(d.rotation);
+            ctx.fillStyle = d.color;
+            ctx.globalAlpha = 0.5;
+            if (d.type === 'scorch') {
+                ctx.beginPath();
+                ctx.arc(0, 0, 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+
         // Draw Particles
         gameState.particles.forEach(p => {
             ctx.save();
@@ -66,10 +81,42 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
             ctx.restore();
         });
 
+        // Draw Powerups
+        gameState.powerUps.forEach(pu => {
+            if (!pu.active) return;
+            ctx.save();
+            ctx.translate(pu.position.x, pu.position.y);
+
+            // Pulse Effect
+            const scale = 1 + Math.sin(time * 5) * 0.2;
+            ctx.scale(scale, scale);
+
+            ctx.fillStyle = pu.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = pu.color;
+
+            if (pu.subtype === 'health') {
+                // Cross
+                ctx.fillRect(-4, -10, 8, 20);
+                ctx.fillRect(-10, -4, 20, 8);
+            } else {
+                // Bolt
+                ctx.beginPath();
+                ctx.moveTo(5, -10);
+                ctx.lineTo(-5, 0);
+                ctx.lineTo(0, 0);
+                ctx.lineTo(-5, 10);
+                ctx.lineTo(5, 0);
+                ctx.lineTo(0, 0);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+
         // Draw Player
         const { player, level } = gameState;
 
-        // 1. Draw Body (Rotated by movement)
         ctx.save();
         ctx.translate(player.position.x, player.position.y);
         ctx.rotate(player.rotation);
@@ -86,10 +133,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
 
         // Level-dependent Body Shape
         if (level === 1) {
-            // Standard Square
             ctx.fillRect(-15, -15, 30, 30);
         } else if (level === 2) {
-            // Armored (Octagon-ish)
             ctx.beginPath();
             ctx.moveTo(15, -5);
             ctx.lineTo(15, 5);
@@ -102,30 +147,41 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
             ctx.closePath();
             ctx.fill();
         } else if (level >= 3) {
-            // Heavy/Mecha (Complex)
-            ctx.fillRect(-18, -18, 36, 36); // Main body
-            ctx.fillStyle = '#003300'; // Darker detail
-            ctx.fillRect(-12, -22, 24, 44); // Treads
+            ctx.fillRect(-18, -18, 36, 36);
+            ctx.fillStyle = '#003300';
+            ctx.fillRect(-12, -22, 24, 44);
         }
         ctx.restore();
 
-        // 2. Draw Turret (Rotated by aim)
+        // Draw Turret (Rotated by aim + Recoil)
         ctx.save();
         ctx.translate(player.position.x, player.position.y);
         ctx.rotate(player.turretRotation);
+
+        // Recoil kickback
+        if (player.recoil > 0) {
+            ctx.translate(-player.recoil, 0);
+        }
 
         ctx.fillStyle = '#fff';
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#fff';
 
-        // Level-dependent Turret
         if (level < 3) {
             ctx.fillRect(0, -5, 25, 10);
         } else {
-            // Dual/Quad Barrel look
             ctx.fillRect(0, -8, 30, 6);
             ctx.fillRect(0, 2, 30, 6);
         }
+
+        // Muzzle Flash
+        if (player.recoil > 3) {
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(30, 0, 10 + Math.random() * 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
         ctx.restore();
 
         // Draw Enemies
@@ -133,35 +189,46 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
             if (!enemy.active) return;
             ctx.save();
             ctx.translate(enemy.position.x, enemy.position.y);
+            ctx.rotate(enemy.rotation); // Rotate to face movement
 
-            // Enemy Gradient
-            const enemyGrad = ctx.createLinearGradient(-15, -15, 15, 15);
-            enemyGrad.addColorStop(0, enemy.color);
-            enemyGrad.addColorStop(1, '#000');
+            // Hit Flash
+            if (enemy.hitFlashTime && enemy.hitFlashTime > 0) {
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = '#ffffff';
+            } else {
+                const enemyGrad = ctx.createLinearGradient(-15, -15, 15, 15);
+                enemyGrad.addColorStop(0, enemy.color);
+                enemyGrad.addColorStop(1, '#000');
+                ctx.fillStyle = enemyGrad;
+                ctx.shadowColor = enemy.color;
+            }
 
-            ctx.fillStyle = enemyGrad;
             ctx.shadowBlur = 15;
-            ctx.shadowColor = enemy.color;
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
 
-            // Shape based on health/type
             ctx.beginPath();
-            if (enemy.health > 1) {
+            if (enemy.subtype === 'dasher') {
+                // Dasher (Arrow shape)
+                ctx.moveTo(15, 0);
+                ctx.lineTo(-10, 10);
+                ctx.lineTo(-5, 0);
+                ctx.lineTo(-10, -10);
+            } else if (enemy.health > 2) {
                 // Tanky Enemy (Diamond)
                 ctx.moveTo(15, 0);
                 ctx.lineTo(0, 15);
                 ctx.lineTo(-15, 0);
                 ctx.lineTo(0, -15);
             } else {
-                // Fast Enemy (Triangle)
+                // Standard Enemy (Triangle)
                 ctx.moveTo(15, 0);
                 ctx.lineTo(-10, 10);
                 ctx.lineTo(-10, -10);
             }
             ctx.closePath();
             ctx.fill();
-            ctx.stroke(); // Add outline for definition
+            ctx.stroke();
             ctx.restore();
         });
 
@@ -170,12 +237,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ gameState, width, height
             if (!bullet.active) return;
             ctx.save();
             ctx.translate(bullet.position.x, bullet.position.y);
-            ctx.fillStyle = '#ffff00';
+            ctx.fillStyle = bullet.color;
             ctx.shadowBlur = 15;
-            ctx.shadowColor = '#ffff00';
+            ctx.shadowColor = bullet.color;
             ctx.beginPath();
             ctx.arc(0, 0, 4, 0, Math.PI * 2);
             ctx.fill();
+            ctx.restore();
+        });
+
+        // Draw Damage Text
+        gameState.damageTexts.forEach(t => {
+            ctx.save();
+            ctx.translate(t.position.x, t.position.y);
+            ctx.fillStyle = t.color;
+            ctx.font = 'bold 16px monospace';
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = t.life;
+            ctx.fillText(t.text, 0, 0);
             ctx.restore();
         });
 
