@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { GameCanvas } from './components/GameCanvas'
+import { GameScene3D } from './components/GameScene3D' // Switched to 3D
 import { MobileControls } from './components/MobileControls'
 import { MainMenu } from './components/MainMenu'
 import { GameOverMenu } from './components/GameOverMenu'
@@ -399,7 +399,7 @@ function App() {
     <div className="w-full h-screen bg-black overflow-hidden flex flex-col relative">
       {/* Game Layer */}
       <div ref={containerRef} className="absolute inset-0 z-0">
-        <GameCanvas
+        <GameScene3D
           gameState={gameState}
           width={dimensions.width}
           height={dimensions.height}
