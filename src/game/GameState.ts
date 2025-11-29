@@ -39,6 +39,7 @@ export interface GameState {
     isMoving: boolean;
     score: number;
     highScore: number;
+    level: number;
     gameOver: boolean;
     gameStarted: boolean; // New field for Main Menu
 }
@@ -65,6 +66,7 @@ export const INITIAL_STATE: GameState = {
     isMoving: false,
     score: 0,
     highScore: 0,
+    level: 1,
     gameOver: false,
     gameStarted: false,
 };

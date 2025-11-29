@@ -5,8 +5,17 @@ import { MainMenu } from './components/MainMenu'
 import { GameOverMenu } from './components/GameOverMenu'
 import { useGameLoop } from './hooks/useGameLoop'
 import { useKeyboardInput } from './hooks/useKeyboardInput'
+import { soundManager } from './game/SoundManager'
 import type { GameState, Entity } from './game/GameState'
 import { INITIAL_STATE } from './game/GameState'
+
+// Level Configuration
+const LEVEL_CONFIG = {
+  1: { enemySpeed: 0.2, fireRate: 150, spawnRate: 1500, enemyHealth: 1, bulletSpeed: 1.0, playerSpeed: 0.4, shotCount: 1, spread: 0 },
+  2: { enemySpeed: 0.3, fireRate: 150, spawnRate: 1200, enemyHealth: 1, bulletSpeed: 1.2, playerSpeed: 0.4, shotCount: 2, spread: 10 }, // Parallel spacing
+  3: { enemySpeed: 0.35, fireRate: 120, spawnRate: 1000, enemyHealth: 2, bulletSpeed: 1.5, playerSpeed: 0.45, shotCount: 3, spread: 10 },
+  4: { enemySpeed: 0.4, fireRate: 80, spawnRate: 600, enemyHealth: 2, bulletSpeed: 1.8, playerSpeed: 0.5, shotCount: 4, spread: 5 }, // Gatling
+};
 
 function App() {
   const [gameState, setGameState] = useState<GameState>(INITIAL_STATE);
@@ -21,12 +30,6 @@ function App() {
   // Keyboard & Mouse Input
   const { movement: keyboardMovement, mousePos, isMouseDown } = useKeyboardInput();
 
-  // Game Constants
-  const PLAYER_SPEED = 0.4;
-  const ENEMY_SPEED = 0.2;
-  const BULLET_SPEED = 1.0;
-  const FIRE_RATE = 150;
-  const SPAWN_RATE = 1500;
   const lastSpawnTimeRef = useRef(0);
 
   // Handle resize
@@ -66,36 +69,72 @@ function App() {
     }
   }, [gameState.score, highScore]);
 
+  const getLevelStats = (level: number) => {
+    // @ts-ignore
+    return LEVEL_CONFIG[level] || LEVEL_CONFIG[4];
+  };
+
   const handleShoot = useCallback(() => {
     setGameState(prev => {
       if (!prev.gameStarted || prev.gameOver) return prev;
 
+      const stats = getLevelStats(prev.level);
       const now = Date.now();
-      if (now - prev.player.lastShotTime < FIRE_RATE) return prev;
+      if (now - prev.player.lastShotTime < stats.fireRate) return prev;
 
       // Use turretRotation for shooting direction
-      const angle = prev.player.turretRotation;
-      const velocity = {
-        x: Math.cos(angle) * BULLET_SPEED,
-        y: Math.sin(angle) * BULLET_SPEED
-      };
+      const baseAngle = prev.player.turretRotation;
+      const newBullets: Entity[] = [];
+      const count = stats.shotCount;
+      const spread = stats.spread; // This is now positional offset for parallel shots
 
-      const newBullet: Entity = {
-        id: `bullet-${now}`,
-        type: 'bullet',
-        position: { ...prev.player.position },
-        velocity,
-        rotation: angle,
-        radius: 4,
-        active: true,
-        color: '#ffff00',
-        health: 1
-      };
+      // Parallel Shot Logic
+      // We calculate the perpendicular vector to the aim direction
+      const perpX = Math.cos(baseAngle + Math.PI / 2);
+      const perpY = Math.sin(baseAngle + Math.PI / 2);
+
+      for (let i = 0; i < count; i++) {
+        let offsetX = 0;
+        let offsetY = 0;
+        let angle = baseAngle;
+
+        if (prev.level === 4) {
+          // Level 4: Gatling (Slight Angle Spread)
+          angle = baseAngle + (Math.random() - 0.5) * 0.1;
+        } else if (count > 1) {
+          // Level 2 & 3: Parallel
+          const offsetScalar = (i - (count - 1) / 2) * spread;
+          offsetX = perpX * offsetScalar;
+          offsetY = perpY * offsetScalar;
+        }
+
+        const velocity = {
+          x: Math.cos(angle) * stats.bulletSpeed,
+          y: Math.sin(angle) * stats.bulletSpeed
+        };
+
+        newBullets.push({
+          id: `bullet-${now}-${i}`,
+          type: 'bullet',
+          position: {
+            x: prev.player.position.x + offsetX,
+            y: prev.player.position.y + offsetY
+          },
+          velocity,
+          rotation: angle,
+          radius: 4,
+          active: true,
+          color: '#ffff00',
+          health: 1
+        });
+      }
+
+      soundManager.playShoot();
 
       return {
         ...prev,
         player: { ...prev.player, lastShotTime: now },
-        bullets: [...prev.bullets, newBullet],
+        bullets: [...prev.bullets, ...newBullets],
         screenShake: { x: (Math.random() - 0.5) * 5, y: (Math.random() - 0.5) * 5 }
       };
     });
@@ -104,11 +143,12 @@ function App() {
   // Auto-shoot with mouse
   useEffect(() => {
     if (isMouseDown && !gameState.gameOver && gameState.gameStarted) {
-      const interval = setInterval(handleShoot, FIRE_RATE);
+      const stats = getLevelStats(gameState.level);
+      const interval = setInterval(handleShoot, stats.fireRate);
       handleShoot();
       return () => clearInterval(interval);
     }
-  }, [isMouseDown, gameState.gameOver, gameState.gameStarted, handleShoot]);
+  }, [isMouseDown, gameState.gameOver, gameState.gameStarted, gameState.level, handleShoot]);
 
   const handleMobileAim = useCallback((angle: number) => {
     setGameState(prev => ({
@@ -135,9 +175,21 @@ function App() {
     const scaledDelta = deltaTime * timeScale;
 
     setGameState(prev => {
+      // Level Up Logic
+      let newLevel = prev.level;
+      if (prev.score >= 5000) newLevel = 4;
+      else if (prev.score >= 2500) newLevel = 3;
+      else if (prev.score >= 1000) newLevel = 2;
+
+      if (newLevel > prev.level) {
+        soundManager.playLevelUp();
+      }
+
+      const stats = getLevelStats(newLevel);
+
       // 1. Update Player
-      const newPlayerX = prev.player.position.x + combinedInput.x * PLAYER_SPEED * scaledDelta;
-      const newPlayerY = prev.player.position.y + combinedInput.y * PLAYER_SPEED * scaledDelta;
+      const newPlayerX = prev.player.position.x + combinedInput.x * stats.playerSpeed * scaledDelta;
+      const newPlayerY = prev.player.position.y + combinedInput.y * stats.playerSpeed * scaledDelta;
 
       // Calculate rotation (Body follows movement)
       let playerRotation = prev.player.rotation;
@@ -159,7 +211,7 @@ function App() {
       // 2. Spawn Enemies
       let newEnemies = [...prev.enemies];
       lastSpawnTimeRef.current += scaledDelta;
-      if (lastSpawnTimeRef.current > SPAWN_RATE) {
+      if (lastSpawnTimeRef.current > stats.spawnRate) {
         lastSpawnTimeRef.current = 0;
         const edge = Math.floor(Math.random() * 4);
         let ex = 0, ey = 0;
@@ -178,8 +230,8 @@ function App() {
           rotation: 0,
           radius: 15,
           active: true,
-          color: '#ff0000',
-          health: 1
+          color: newLevel >= 3 ? '#ff00ff' : '#ff0000', // Purple enemies are stronger
+          health: stats.enemyHealth
         });
       }
 
@@ -192,8 +244,8 @@ function App() {
         return {
           ...enemy,
           position: {
-            x: enemy.position.x + Math.cos(angle) * ENEMY_SPEED * scaledDelta,
-            y: enemy.position.y + Math.sin(angle) * ENEMY_SPEED * scaledDelta
+            x: enemy.position.x + Math.cos(angle) * stats.enemySpeed * scaledDelta,
+            y: enemy.position.y + Math.sin(angle) * stats.enemySpeed * scaledDelta
           },
           rotation: angle
         };
@@ -241,25 +293,50 @@ function App() {
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < bullet.radius + enemy.radius) {
             bullet.active = false;
-            enemy.active = false;
-            score += 100;
 
-            for (let i = 0; i < 8; i++) {
-              const pAngle = Math.random() * Math.PI * 2;
-              const speed = Math.random() * 2 + 1;
-              newParticles.push({
-                id: `p-${Date.now()}-${i}`,
-                position: { ...enemy.position },
-                velocity: { x: Math.cos(pAngle) * speed, y: Math.sin(pAngle) * speed },
-                life: 1.0,
-                maxLife: 1.0,
-                color: '#ff4400',
-                size: Math.random() * 4 + 2
-              });
+            // Damage Logic
+            enemy.health -= 1;
+            if (enemy.health <= 0) {
+              enemy.active = false;
+              score += 100;
+              soundManager.playExplosion();
+
+              // Explosion Particles
+              for (let i = 0; i < 8; i++) {
+                const pAngle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 2 + 1;
+                newParticles.push({
+                  id: `p-${Date.now()}-${i}`,
+                  position: { ...enemy.position },
+                  velocity: { x: Math.cos(pAngle) * speed, y: Math.sin(pAngle) * speed },
+                  life: 1.0,
+                  maxLife: 1.0,
+                  color: enemy.color,
+                  size: Math.random() * 4 + 2
+                });
+              }
+
+              screenShake.x = (Math.random() - 0.5) * 10;
+              screenShake.y = (Math.random() - 0.5) * 10;
+            } else {
+              // Hit effect but not dead
+              soundManager.playHit();
+              screenShake.x = (Math.random() - 0.5) * 5;
+              screenShake.y = (Math.random() - 0.5) * 5;
+              for (let i = 0; i < 3; i++) {
+                const pAngle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 2 + 1;
+                newParticles.push({
+                  id: `p-${Date.now()}-${i}`,
+                  position: { ...enemy.position },
+                  velocity: { x: Math.cos(pAngle) * speed, y: Math.sin(pAngle) * speed },
+                  life: 0.5,
+                  maxLife: 0.5,
+                  color: '#fff',
+                  size: 2
+                });
+              }
             }
-
-            screenShake.x = (Math.random() - 0.5) * 10;
-            screenShake.y = (Math.random() - 0.5) * 10;
           }
         });
       });
@@ -272,6 +349,7 @@ function App() {
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < enemy.radius + prev.player.radius) {
           gameOver = true;
+          soundManager.playGameOver();
           screenShake.x = (Math.random() - 0.5) * 20;
           screenShake.y = (Math.random() - 0.5) * 20;
         }
@@ -286,13 +364,14 @@ function App() {
           ...prev.player,
           position: { x: clampedX, y: clampedY },
           rotation: playerRotation,
-          turretRotation // Update turret rotation
+          turretRotation
         },
         enemies: newEnemies,
         bullets: newBullets,
         particles: newParticles,
         screenShake,
         score,
+        level: newLevel,
         gameOver
       };
     });
@@ -301,6 +380,7 @@ function App() {
   useGameLoop(updateGame);
 
   const startGame = () => {
+    soundManager.init(); // Initialize audio context
     setGameState(prev => ({ ...prev, gameStarted: true }));
   };
 
@@ -335,8 +415,13 @@ function App() {
               <h1 className="text-green-500 font-mono text-xl font-bold">QUANTUM TANK</h1>
               <p className="text-green-400/70 text-sm font-mono">SYSTEM: ONLINE</p>
             </div>
-            <div className="bg-black/50 p-4 rounded border border-green-500/30 backdrop-blur-sm">
-              <p className="text-green-500 font-mono text-xl">SCORE: {gameState.score}</p>
+            <div className="flex flex-col gap-2 items-end">
+              <div className="bg-black/50 p-4 rounded border border-green-500/30 backdrop-blur-sm">
+                <p className="text-green-500 font-mono text-xl">SCORE: {gameState.score}</p>
+              </div>
+              <div className="bg-black/50 p-2 rounded border border-yellow-500/30 backdrop-blur-sm">
+                <p className="text-yellow-500 font-mono text-lg">LEVEL {gameState.level}</p>
+              </div>
             </div>
           </div>
         )}
